@@ -1,0 +1,77 @@
+#+TITLE: Org Element Cache
+
+* TODO Longterm
+Define language for transformers working on org-elements,
+reducing them to a single small object that's persisted to disk.
+* Introduction
+Org-mode already includes a cache for parsed elements.
+This is disabled by default since there seem to be problems with the
+implementation that cause Emacs to hang after making changes to org files.
+
+In the long term, it would be nice to reuse as much of the existing
+code as possible and figure out where the bugs are.
+
+For now, this package provides a simple interface for registering
+functions that compute values based on parsed org elements, then
+storing these values in a "database" that is persisted to disk to
+speed up loading times.
+
+This readme contains the main code of the package and my personal
+configuration of it, written as a literate org-mode file.
+
+When working with a large number of (small) org-mode files, finding
+files and headlines matching some criterion becomes very slow.
+
+This package tries to alleviate that problem by allowing users to
+register functions that are called with a parsed representation of a
+buffers contents each time it is saved or loses focus and that produce
+some value that is stored in an in-memory cache.
+
+* Directories
+The cache is limited to =.org= files in a list of directories.
+These directories can be configured in ~org-el-cache-directories~.
+* Cache Table
+Data from files (and e.g. headlines) is persisted in *plists* stored
+in a hash table using a filenames as keys.
+* Hashing
+The hash of a file or buffer is used to determine if it has changed
+since it was last processed by the cache.
+
+When updating a single file, ~(buffer-hash)~ is fast enough.
+
+To speed up recursively searching directories for =.org= files and
+calculating their hashes, the ~find~ and ~sha1sum~ shell commands are
+used instead of ~directory-files-recursively~ and ~buffer-hash~.
+* Persistence
+Populating the cache for the first time takes a few seconds / minutes,
+depending on the number of org files to process.
+
+It is then persisted and file hashes are used to update only entries
+that have changed when it is recreated.
+
+This code is based on ~recentf-save-list~.
+** TODO Save to disk when Emacs closes
+see =pcache= package.
+* Hooks
+There are two types of hooks, ones that run on whole files and ones
+that run on each headline of a files.
+
+Hooks are expected to return a plist of values (using keywords as
+keys) that is then merged with the files / headlines properties.
+
+* File Hooks
+The =keywords= hook parses each =#+KEY: VALUE= before the first
+headline of a file into an alist.
+
+** TODO Move to separate files, include from config
+** TODO Move hooks to separate files
+** TODO Usage Example
+* Headline Hooks
+* TODO Queries / Filtering
+* Benchmarks
+Working on a collection of ~1500 files with ~200k lines in total,
+initializing the cache takes around ~36s on my machine
+(Thinkpad L470, SSD).
+
+Updating the cache once it has been initialized / loaded from disk
+takes around 200ms.
