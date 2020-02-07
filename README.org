@@ -1,38 +1,128 @@
 #+TITLE: Org Element Cache
 
-* TODO Longterm
-Define language for transformers working on org-elements,
-reducing them to a single small object that's persisted to disk.
 * Introduction
-Org-mode already includes a cache for parsed elements.
-This is disabled by default since there seem to be problems with the
-implementation that cause Emacs to hang after making changes to org files.
+The [[https://orgmode.org/worg/dev/org-element-api.html][Org Element API]] allows parsing & manipulating org-mode files
+in the form of lisp objects.
 
-In the long term, it would be nice to reuse as much of the existing
-code as possible and figure out where the bugs are.
+A cache for these objects is already included in org-mode
+and disabled by default.
 
-For now, this package provides a simple interface for registering
-functions that compute values based on parsed org elements, then
-storing these values in a "database" that is persisted to disk to
-speed up loading times.
+However, when working with large numbers (> 1000) of files,
+populating and processing this cache for each file takes a long time.
 
-This readme contains the main code of the package and my personal
-configuration of it, written as a literate org-mode file.
+This package tries to alleviate this problem by:
 
-When working with a large number of (small) org-mode files, finding
-files and headlines matching some criterion becomes very slow.
+1. Allowing users to register hooks that compute some data form an org element
+2. Persisting the results on disk
+3. Taking care of keeping the cached data in sync with the actual
+   buffer contents
 
-This package tries to alleviate that problem by allowing users to
-register functions that are called with a parsed representation of a
-buffers contents each time it is saved or loses focus and that produce
-some value that is stored in an in-memory cache.
+In the current version, only hooks on a file-level are implemented.
+Future versions might include a way to register hooks for element
+types.
+* Structure of a Cache
+A cache has four components:
 
-* Directories
-The cache is limited to =.org= files in a list of directories.
-These directories can be configured in ~org-el-cache-directories~.
-* Cache Table
-Data from files (and e.g. headlines) is persisted in *plists* stored
-in a hash table using a filenames as keys.
+1. A hash table with a plist for each file managed by the cache
+2. A list of folders used to find files managed by the cache
+3. A list of hooks to generate cached data
+4. A file to persist the cache in
+
+** Populating the Cache
+A cache is populated with entries by opening each file in a temporary
+buffer, parsing it to an ~org-element~ and passing this element to
+each of the hooks.
+
+Doing this for the first time can take a few seconds, depending on the
+number of files in the cache.
+
+Once the cache has been saved to disk for the first time, a
+combination of the ~find~ and ~sha1sum~ shell commands is used to
+determine which entries need to be updated.
+
+Assuming you're only using one emacs instance at a time, updating the
+cache on startup should take only a few milliseconds.
+* Usage
+** Defining Caches
+The ~def-org-el-cache~ macro can be used to define a new cache.
+
+#+begin_src emacs-lisp
+  (def-org-el-cache
+    my-cache          ;; name of the cache / variable to store it in
+    (list "~/org")    ;; directories managed by this cache
+    "~/org/.cache.el" ;; file to persist the cache in
+    )
+#+end_src
+** Adding Hooks
+Hooks can be added to a cache with the ~org-el-cache-add-hook~
+function.
+
+#+begin_src emacs-lisp
+  (org-el-cache-add-hook
+   my-cache               ;; Cache to add the hook to
+   :my-property           ;; Property name to use for this hook
+   (lambda (filename element)
+     ;; Do something with the element and return some value
+     ))
+#+end_src
+** Updating Caches
+- ~(org-el-cache-update cache)~ updates all outdated entries in the cache
+- ~(org-el-cache-force-update cache)~ re-initializes the cache
+
+If you changed the definition of a hook or added a new one,
+use ~org-el-cache-force-update~ to re-initialize the cache.
+** Accessing Cached Data
+- ~(org-el-cache-get cache filename)~ returns the cache entry for a file
+- ~(org-el-cache-file-property cache filename prop)~ returns the value
+  of a files property
+
+The following functions work on all entries of a cache.
+For more information on them, refer to the functions documentation
+(e.g. ~C-h f org-el-cache-map~).
+
+- ~org-el-cache-reduce~
+- ~org-el-cache-map~
+- ~org-el-cache-select~
+- ~org-el-cache-each~
+** Persisting Caches
+All caches are saved to disk at regular intervals (configurable via
+~org-el-cache-presist-interval~, defaults to 10 minutes).
+
+Usually, there is no need to manually persist or load a cache.
+If you want to do so anyway, you can use the following functions:
+
+- ~(org-el-cache-persist-all)~ persists all caches
+- ~(org-el-cache-persist cache)~ persists a single cache
+- ~(org-el-cache-load cache)~ loads a cache from disk
+** Example
+[[file:examples/file-selector.el]] contains the code for a file-selector
+(similar to Emacs' find-file) that uses the titles of files instead of
+their paths.
+
+For more information, you can check out the integration tests in
+[[file:org-el-cache-test.el]].
+* Prior / Similar Art
+- [[https://github.com/ndwarshuis/org-sql][ndwarshuis/org-sql]]
+- [[https://github.com/sigma/pcache][sigma/pcache]]
+* Limitations
+Cached data is limited to objects that can be printed / read
+(serialized / deserialized).
+
+This means that there is no (elegant) way to cache markers in files,
+e.g. when using cached headline data for org-agenda views.
+
+A possible workaround would be attaching IDs to every headline,
+then using this ID (instead of a marker) to jump to a headline
+e.g. to change its TODO state.
+* Dependencies
+org-el-cache uses a number of shell commands
+to find files that need to be updated.
+
+1. ~find~
+2. ~xargs~
+3. ~sha1sum~
+
+These should be installed by default on most Linux / Unix distros.
 * Hashing
 The hash of a file or buffer is used to determine if it has changed
 since it was last processed by the cache.
@@ -42,32 +132,6 @@ When updating a single file, ~(buffer-hash)~ is fast enough.
 To speed up recursively searching directories for =.org= files and
 calculating their hashes, the ~find~ and ~sha1sum~ shell commands are
 used instead of ~directory-files-recursively~ and ~buffer-hash~.
-* Persistence
-Populating the cache for the first time takes a few seconds / minutes,
-depending on the number of org files to process.
-
-It is then persisted and file hashes are used to update only entries
-that have changed when it is recreated.
-
-This code is based on ~recentf-save-list~.
-** TODO Save to disk when Emacs closes
-see =pcache= package.
-* Hooks
-There are two types of hooks, ones that run on whole files and ones
-that run on each headline of a files.
-
-Hooks are expected to return a plist of values (using keywords as
-keys) that is then merged with the files / headlines properties.
-
-* File Hooks
-The =keywords= hook parses each =#+KEY: VALUE= before the first
-headline of a file into an alist.
-
-** TODO Move to separate files, include from config
-** TODO Move hooks to separate files
-** TODO Usage Example
-* Headline Hooks
-* TODO Queries / Filtering
 * Benchmarks
 Working on a collection of ~1500 files with ~200k lines in total,
 initializing the cache takes around ~36s on my machine
@@ -75,3 +139,10 @@ initializing the cache takes around ~36s on my machine
 
 Updating the cache once it has been initialized / loaded from disk
 takes around 200ms.
+* Relation to ~org-element-cache~
+Org-mode already includes a cache for parsed elements.
+This is disabled by default since there seem to be problems with the
+implementation that cause Emacs to hang after making changes to org files.
+
+In the long term, it would be nice to reuse as much of the existing
+code as possible and figure out where the bugs are.
