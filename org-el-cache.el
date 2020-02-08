@@ -111,6 +111,10 @@ NAME should be a symbol."
 
 ;;; Helper Functions
 
+(defun org-el-cache--buffer-hash ()
+  "Returns a hash for the current buffers contents."
+  (secure-hash 'sha1 (buffer-string)))
+
 (defun org-el-cache-interpret-data (data)
   "Interpret DATA stripping positional / style information."
   (let ((string (org-element-interpret-data data)))
@@ -135,7 +139,7 @@ current buffer."
   (org-el-cache--process-root
    cache
    filename
-   (buffer-hash)
+   (org-el-cache--buffer-hash)
    (org-element-parse-buffer)))
 
 (defmethod org-el-cache--process-root ((cache org-el-cache) filename hash el)
@@ -161,7 +165,7 @@ current buffer."
     (delay-mode-hooks
       (org-mode)
       (cons
-       (buffer-hash)
+       (org-el-cache--buffer-hash)
        (org-element-parse-buffer)))))
 
 (defun org-el-cache-process-file (file)
@@ -186,7 +190,7 @@ current buffer."
           (when (org-el-cache-member-p cache filename)
             (unless el
               (setq el (org-element-parse-buffer))
-              (setq hash (buffer-hash)))
+              (setq hash (org-el-cache--buffer-hash)))
             (org-el-cache--process-root cache filename hash el))))))
 
 (defmethod org-el-cache--rename-file ((cache org-el-cache) from to)
