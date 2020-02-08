@@ -17,23 +17,22 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-;; Define a new cache
+;; Extract a files title by mapping over all keywords
+;; in it, returning the value of the ~#+TITLE~ keyword
+(defun file-selector--extract-title (filename el)
+  (org-element-map el 'keyword
+    (lambda (kw)
+      (if (string= (org-element-property :key kw) "TITLE")
+          (org-element-property :value kw)))
+    :first-match t))
+
+;; Define a new cache.  It is automatically updated and loaded if a
+;; persisted file exists.
 (def-org-el-cache
   file-selector-cache
   '("~/org")
-  "~/org/.file-selector-cache.el")
-
-;; Add a hook that extracts a files title by mapping over all keywords
-;; in it, returning the value of the ~#+TITLE~ keyword
-(org-el-cache-add-hook
- file-selector-cache
- :title
- (lambda (filename el)
-   (org-element-map el 'keyword
-     (lambda (kw)
-       (if (string= (org-element-property :key kw) "TITLE")
-           (org-element-property :value kw)))
-     :first-match t)))
+  "~/org/.file-selector-cache.el"
+  #'file-selector--extract-title)
 
 ;; Update / Initialize the cache
 (org-el-cache-update file-selector-cache)
@@ -46,7 +45,7 @@
    (org-el-cache-map
     file-selector-cache
     (lambda (filename entry)
-      (cons (plist-get entry :title) filename)))
+      (cons entry filename)))
    :action
    (lambda (selection)
      (find-file (cdr selection)))))

@@ -51,16 +51,15 @@
     (def-org-el-cache
       org-el-test-cache
       (list dir)
-      (expand-file-name "cache.el" dir))
-
-    (org-el-cache-add-hook org-el-test-cache :title #'org-el-cache-test--extract-tile)
+      (expand-file-name "cache.el" dir)
+      #'org-el-cache-test--extract-tile)
 
     (org-el-cache-update org-el-test-cache)
     (should (= (org-el-cache-count org-el-test-cache) 2))
 
     ;; Hook Data
-    (should (equal (org-el-cache-file-property org-el-test-cache f1 :title) "Foo"))
-    (should (equal (org-el-cache-file-property org-el-test-cache f2 :title) "Bar"))
+    (should (equal (org-el-cache-get org-el-test-cache f1) "Foo"))
+    (should (equal (org-el-cache-get org-el-test-cache f2) "Bar"))
 
     ;; Persistence
     (org-el-cache-persist org-el-test-cache)
@@ -68,15 +67,15 @@
     (should (= (org-el-cache-count org-el-test-cache) 0))
     (org-el-cache-load org-el-test-cache)
     (should (= (org-el-cache-count org-el-test-cache) 2))
-    (should (equal (org-el-cache-file-property org-el-test-cache f1 :title) "Foo"))
-    (should (equal (org-el-cache-file-property org-el-test-cache f2 :title) "Bar"))
+    (should (equal (org-el-cache-get org-el-test-cache f1) "Foo"))
+    (should (equal (org-el-cache-get org-el-test-cache f2) "Bar"))
 
     ;; File Updating
     (with-current-buffer (find-file-noselect f1)
       (erase-buffer)
       (insert "#+TITLE: Baz\n")
       (save-buffer))
-    (should (equal (org-el-cache-file-property org-el-test-cache f1 :title) "Baz"))
+    (should (equal (org-el-cache-get org-el-test-cache f1) "Baz"))
 
     ;; Deleting Files
     (delete-file f1)
@@ -86,5 +85,4 @@
     ;; Renaming Files
     (rename-file f2 new-name)
     (should (= (org-el-cache-count org-el-test-cache) 1))
-    (should (equal (org-el-cache-files org-el-test-cache) (list new-name)))
-    (should (equal (plist-get (org-el-cache-get org-el-test-cache new-name) :file) new-name))))
+    (should (equal (org-el-cache-files org-el-test-cache) (list new-name)))))

@@ -31,7 +31,7 @@
 (defclass org-el-cache ()
   ((folders :initarg :folders)
    (file :initarg :file)
-   (hooks :initform '())
+   (hook :initarg :hook)
    (table :initarg :table)
    (include-archives :initarg :include-archives)))
 
@@ -41,13 +41,14 @@
 (defun org-el-all-caches ()
   (loop for (k v) on org-el-caches by #'cddr collecting v))
 
-(defun make-org-el-cache (folders file &optional include-archives)
+(defun make-org-el-cache (folders file hook &optional include-archives)
   "Create a new org-el-cache object."
   (let ((cache
          (make-instance
           'org-el-cache
           :folders folders
           :file file
+          :hook hook
           :include-archives include-archives
           :table (make-hash-table :test 'equal :size 1000))))
     ;; Try loading the cache from disk
@@ -55,15 +56,9 @@
     cache))
 
 (defun org-el-cache-get (cache file)
-  "Get the entry for FILE from CACHE."
-  (gethash file (oref cache table)))
-
-(defun org-el-cache-file-property (cache file prop &optional default)
-  "Get the value of PROP for FILE in CACHE.
-If the property has no value, return DEFAULT,
-if FILE is not part of the cache, return nil."
-  (if-let ((entry (org-el-cache-get cache file)))
-      (or (plist-get entry prop) default)))
+  "Get the value for FILE from CACHE."
+  (if-let ((entry (gethash file (oref cache table))))
+      (plist-get entry :data)))
 
 (defun org-el-cache-member-p (cache file)
   "Check if FILE is part of the files in CACHE."
@@ -94,20 +89,16 @@ if FILE is not part of the cache, return nil."
   "List of all files managed by CACHE."
   (hash-table-keys (oref cache table)))
 
-(defmacro def-org-el-cache (name folders file &optional include-archives)
+(defmacro def-org-el-cache (name folders file fn &optional include-archives)
   "Create a new org-el-cache and add it to the list of active caches.
 NAME should be a symbol."
   ;; (unless (symbolp name)
   ;;   (error "org-el-cache: cache name should be a symbol, was %s" name))
   `(progn
-     (let ((cache (make-org-el-cache ,folders ,file ,include-archives))
+     (let ((cache (make-org-el-cache ,folders ,file ,fn ,include-archives))
            (var (quote ,name)))
        (setq org-el-caches (plist-put org-el-caches var cache))
        (setq ,name cache))))
-
-(defun org-el-cache-add-hook (cache prop hook)
-  (with-slots (hooks) cache
-    (setf hooks (plist-put hooks prop hook))))
 
 ;;; Helper Functions
 
@@ -144,15 +135,13 @@ current buffer."
 
 (defun org-el-cache--process-root (cache filename hash el)
   "Process the org-element root element EL."
-  (with-slots (hooks table) cache
-    (let ((entry `(:file ,filename :hash ,hash)))
-      (loop for (prop hook) on hooks by 'cddr do
-            (setq entry
-                  (plist-put
-                   entry
-                   prop
-                   (funcall hook filename el))))
-      (puthash filename entry table))))
+  (with-slots (hook table) cache
+    (puthash
+     filename
+     (list :file filename
+           :hash hash
+           :data (funcall hook filename el))
+     table)))
 
 ;;; Processing Files / Buffers, Global
 
@@ -312,7 +301,7 @@ FN is called with three arguments:
 2. the cache entry
 3. the accumulator, initially set to ACC "
   (maphash
-   (lambda (key value) (setq acc (funcall fn key value acc)))
+   (lambda (key entry) (setq acc (funcall fn key (plist-get entry :data) acc)))
    (oref cache table))
   acc)
 
@@ -344,7 +333,10 @@ FN is with two arguments:
 FN is called with two arguments:
 1. the cache key (filename)
 2. the cache entry"
-  (maphash fn (oref cache table)))
+  (maphash
+   (lambda (filename entry)
+     (funcall fn filename (plist-get entry :data)))
+   (oref cache table)))
 
 ;;; Exports
 
