@@ -95,7 +95,11 @@ NAME should be a symbol."
   ;; (unless (symbolp name)
   ;;   (error "org-el-cache: cache name should be a symbol, was %s" name))
   `(progn
-     (let ((cache (make-org-el-cache ,folders ,file ,fn ,include-archives))
+     (let ((cache (make-org-el-cache
+                   ,folders
+                   ,file
+                   ,fn
+                   ,include-archives))
            (var (quote ,name)))
        (setq org-el-caches (plist-put org-el-caches var cache))
        (setq ,name cache))))
@@ -251,7 +255,7 @@ current buffer."
 (defun org-el-cache-update (cache)
   "Update all outdated entries in CACHE."
   (loop for (file . hash) in (org-el-cache--file-hashes cache) do
-        (let ((entry (org-el-cache-get cache file)))
+        (let ((entry (gethash file (oref cache table))))
           (unless (and entry (string= (plist-get entry :hash) hash))
             (org-el-cache--process-file cache file)))))
 
