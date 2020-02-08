@@ -54,18 +54,18 @@
     (org-el-cache-load cache)
     cache))
 
-(defmethod org-el-cache-get ((cache org-el-cache) file)
+(defun org-el-cache-get (cache file)
   "Get the entry for FILE from CACHE."
   (gethash file (oref cache table)))
 
-(defmethod org-el-cache-file-property ((cache org-el-cache) file prop &optional default)
+(defun org-el-cache-file-property (cache file prop &optional default)
   "Get the value of PROP for FILE in CACHE.
 If the property has no value, return DEFAULT,
 if FILE is not part of the cache, return nil."
   (if-let ((entry (org-el-cache-get cache file)))
       (or (plist-get entry prop) default)))
 
-(defmethod org-el-cache-member-p ((cache org-el-cache) file)
+(defun org-el-cache-member-p (cache file)
   "Check if FILE is part of the files in CACHE."
   (with-slots (folders include-archives) cache
     (let ((extension (file-name-extension file))
@@ -76,21 +76,21 @@ if FILE is not part of the cache, return nil."
             (lambda (folder) (string-prefix-p (expand-file-name folder) file))
             folders)))))
 
-(defmethod org-el-cache-remove ((cache org-el-cache) file)
+(defun org-el-cache-remove (cache file)
   (remhash
    (expand-file-name file)
    (oref cache table)))
 
-(defmethod org-el-cache-clear ((cache org-el-cache))
+(defun org-el-cache-clear (cache)
   "Clear CACHE."
   (interactive)
   (clrhash (oref cache table)))
 
-(defmethod org-el-cache-count ((cache org-el-cache))
+(defun org-el-cache-count (cache)
   "Get the number of files in CACHE."
   (hash-table-count (oref cache table)))
 
-(defmethod org-el-cache-files ((cache org-el-cache))
+(defun org-el-cache-files (cache)
   "List of all files managed by CACHE."
   (hash-table-keys (oref cache table)))
 
@@ -105,7 +105,7 @@ NAME should be a symbol."
        (setq org-el-caches (plist-put org-el-caches var cache))
        (setq ,name cache))))
 
-(defmethod org-el-cache-add-hook ((cache org-el-cache) prop hook)
+(defun org-el-cache-add-hook (cache prop hook)
   (with-slots (hooks) cache
     (setf hooks (plist-put hooks prop hook))))
 
@@ -124,7 +124,7 @@ NAME should be a symbol."
 
 ;; This is the fastest way of parsing the contents of a file into an
 ;; org-element I've found so far.
-(defmethod org-el-cache--process-file ((cache org-el-cache) file)
+(defun org-el-cache--process-file (cache file)
   "Process FILE for CACHE."
   (with-temp-buffer
     (insert-file-contents file)
@@ -132,7 +132,7 @@ NAME should be a symbol."
       (org-mode)
       (org-el-cache--process-buffer cache file))))
 
-(defmethod org-el-cache--process-buffer ((cache org-el-cache) filename)
+(defun org-el-cache--process-buffer (cache filename)
   "Update the cache entry for FILE using the contents of the
 current buffer."
   (message "Processing file %s" filename)
@@ -142,7 +142,7 @@ current buffer."
    (org-el-cache--buffer-hash)
    (org-element-parse-buffer)))
 
-(defmethod org-el-cache--process-root ((cache org-el-cache) filename hash el)
+(defun org-el-cache--process-root (cache filename hash el)
   "Process the org-element root element EL."
   (with-slots (hooks table) cache
     (let ((entry `(:file ,filename :hash ,hash)))
@@ -193,7 +193,7 @@ current buffer."
               (setq hash (org-el-cache--buffer-hash)))
             (org-el-cache--process-root cache filename hash el))))))
 
-(defmethod org-el-cache--rename-file ((cache org-el-cache) from to)
+(defun org-el-cache--rename-file (cache from to)
   (if (org-el-cache-member-p cache from)
    (with-slots (table) cache
      (if (org-el-cache-member-p cache to)
@@ -244,7 +244,7 @@ current buffer."
      "find %s -name \"[a-Z0-9_]*.org\" "
      (mapconcat 'identity paths " "))))
 
-(defmethod org-el-cache--file-hashes ((cache org-el-cache))
+(defun org-el-cache--file-hashes (cache)
   "List all files managed by CACHE together with their hashes."
   (with-slots (folders include-archives) cache
     (mapcar
@@ -259,28 +259,28 @@ current buffer."
       "\n"
       t))))
 
-(defmethod org-el-cache-update ((cache org-el-cache))
+(defun org-el-cache-update (cache)
   "Update all outdated entries in CACHE."
   (loop for (file . hash) in (org-el-cache--file-hashes cache) do
         (let ((entry (org-el-cache-get cache file)))
           (unless (and entry (string= (plist-get entry :hash) hash))
             (org-el-cache--process-file cache file)))))
 
-(defmethod org-el-cache-force-update ((cache org-el-cache))
+(defun org-el-cache-force-update (cache)
   "Re-initialize CACHE."
   (org-el-cache-clear cache)
   (org-el-cache-update cache))
 
 ;;; Persisting / Loading Caches
 
-  (defmethod org-el-cache-persist ((cache org-el-cache))
+  (defun org-el-cache-persist (cache)
     "Store CACHE on disk."
     (with-slots (table file) cache
       (with-temp-buffer
         (insert (with-output-to-string (prin1 table)))
         (write-file file))))
 
-(defmethod org-el-cache-load ((cache org-el-cache))
+(defun org-el-cache-load (cache)
   "Try loading CACHE from disk."
   (with-slots (table file) cache
     (if (file-exists-p file)
@@ -305,7 +305,7 @@ current buffer."
 
 ;;; Mapping / Reduction Functions
 
-(defmethod org-el-cache-reduce ((cache org-el-cache) fn acc)
+(defun org-el-cache-reduce (cache fn acc)
   "Reduce over each entry of CACHE using FN.
 FN is called with three arguments:
 1. the cache key (filename)
@@ -316,7 +316,7 @@ FN is called with three arguments:
    (oref cache table))
   acc)
 
-(defmethod org-el-cache-map ((cache org-el-cache) mapfn)
+(defun org-el-cache-map (cache mapfn)
   "Map over each entry in CACHE, collecting the results of calling
 FN with two arguments:
 1. the cache key (filename)
@@ -326,7 +326,7 @@ FN with two arguments:
    (lambda (key value acc) (cons (funcall mapfn key value) acc))
    '()))
 
-(defmethod org-el-cache-select ((cache org-el-cache) filterfn)
+(defun org-el-cache-select (cache filterfn)
   "Map over each entry in CACHE, collecting all files for which FN evaluates to a non-nil value.
 FN is with two arguments:
 1. the cache key (filename)
@@ -339,7 +339,7 @@ FN is with two arguments:
        acc))
    '()))
 
-(defmethod org-el-cache-each ((cache org-el-cache) fn)
+(defun org-el-cache-each (cache fn)
   "Call FN for each entry in CACHE.
 FN is called with two arguments:
 1. the cache key (filename)

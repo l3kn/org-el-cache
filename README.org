@@ -146,3 +146,9 @@ implementation that cause Emacs to hang after making changes to org files.
 
 In the long term, it would be nice to reuse as much of the existing
 code as possible and figure out where the bugs are.
+* Changelog
+** [2020-02-08 Sat 12:50]
+*** Internal
+- Use ~secure-hash~ instead of ~buffer-hash~
+- Use ~defun~ instead of ~defmethod~, the function help looks nicer
+  this way and we don't need overloaded methods
