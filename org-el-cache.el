@@ -23,8 +23,25 @@
 
 ;;; Configuration
 
-(defcustom org-el-cache-persist-interval (* 10 60)
-  "Store the cache on disk every n seconds.")
+(defgroup org-el-cache nil
+  "Persistent cache for data derived from org-elements."
+  :group 'external
+  :group 'text)
+
+(defcustom org-el-cache-persist-interval (* 30 60)
+  "Store the cache on disk every n seconds."
+  :type 'integer
+  :group 'org-el-cache)
+
+(defcustom org-el-cache-directory (expand-file-name "org-el-caches/" user-emacs-directory)
+  "Directory to store cache files in."
+  :type 'path
+  :group 'org-el-cache)
+
+(defcustom org-el-cache-persist t
+  "Enable persisting caches to disk"
+  :type 'boolean
+  :group 'org-el-cache)
 
 ;;; Creating Caches
 
@@ -33,27 +50,52 @@
    (file :initarg :file)
    (hook :initarg :hook)
    (table :initarg :table)
-   (include-archives :initarg :include-archives)))
+   (include-archives :initarg :include-archives)
+   (name :initarg :name)))
 
-(defvar org-el-caches '()
-  "List of all org-el-caches.")
+(defvar org-el-caches (make-hash-table :test 'eq :size 10)
+  "Table of all org-el-caches.")
 
 (defun org-el-all-caches ()
-  (loop for (k v) on org-el-caches by #'cddr collecting v))
+  "Get a list of all active caches."
+  (hash-table-values org-el-caches))
 
-(defun make-org-el-cache (folders file hook &optional include-archives)
-  "Create a new org-el-cache object."
+(defun org-el-cache-remove-cache (cache)
+  "Remove CACHE from the list of active caches."
+  (remhash (oref cache name) org-el-caches))
+
+(cl-defun make-org-el-cache (name folders hook &key file include-archives)
+  "Create a new org-el-cache and add it to the list of active caches.
+NAME should be a symbol."
+  (unless (symbolp name)
+    (error "org-el-cache: Cache name must be a symbol, was %s" name))
+  (when (null file)
+    (setq file (expand-file-name (format "%s.el" name) org-el-cache-directory)))
+  (make-directory (file-name-directory file) t)
   (let ((cache
          (make-instance
           'org-el-cache
-          :folders folders
+          :name name
+          :folders (mapcar #'expand-file-name folders)
           :file file
           :hook hook
           :include-archives include-archives
           :table (make-hash-table :test 'equal :size 1000))))
-    ;; Try loading the cache from disk
-    (org-el-cache-load cache)
+    (if org-el-cache-persist
+        (org-el-cache-load cache))
+    (puthash name cache org-el-caches)
     cache))
+
+(cl-defmacro def-org-el-cache (name folders hook &key file include-archives)
+  "Convenience macro around `make-org-el-cache' that creates a
+cache and binds it to a variable named NAME."
+  ;; Make sure to evaluate name only once
+  (unless (symbolp name)
+    (error "org-el-cache: Cache name must be a symbol, was %s" name))
+  `(setq ,name
+         (make-org-el-cache (quote ,name) ,folders ,hook
+                            :file ,file
+                            :include-archives ,include-archives)))
 
 (defun org-el-cache-get (cache file)
   "Get the value for FILE from CACHE."
@@ -68,7 +110,7 @@
       (and (or (string= extension "org")
                (and include-archives (string= extension "org_archive")))
            (some
-            (lambda (folder) (string-prefix-p (expand-file-name folder) file))
+            (lambda (folder) (string-prefix-p folder file))
             folders)))))
 
 (defun org-el-cache-remove (cache file)
@@ -89,26 +131,7 @@
   "List of all files managed by CACHE."
   (hash-table-keys (oref cache table)))
 
-(defmacro def-org-el-cache (name folders file fn &optional include-archives)
-  "Create a new org-el-cache and add it to the list of active caches.
-NAME should be a symbol."
-  ;; (unless (symbolp name)
-  ;;   (error "org-el-cache: cache name should be a symbol, was %s" name))
-  `(progn
-     (let ((cache (make-org-el-cache
-                   ,folders
-                   ,file
-                   ,fn
-                   ,include-archives))
-           (var (quote ,name)))
-       (setq org-el-caches (plist-put org-el-caches var cache))
-       (setq ,name cache))))
-
 ;;; Helper Functions
-
-(defun org-el-cache--buffer-hash ()
-  "Returns a hash for the current buffers contents."
-  (secure-hash 'sha1 (buffer-string)))
 
 (defun org-el-cache-interpret-data (data)
   "Interpret DATA stripping positional / style information."
@@ -134,7 +157,7 @@ current buffer."
   (org-el-cache--process-root
    cache
    filename
-   (org-el-cache--buffer-hash)
+   (secure-hash 'sha1 (current-buffer))
    (org-element-parse-buffer)))
 
 (defun org-el-cache--process-root (cache filename hash el)
@@ -158,7 +181,7 @@ current buffer."
     (delay-mode-hooks
       (org-mode)
       (cons
-       (org-el-cache--buffer-hash)
+       (secure-hash 'sha1 (current-buffer))
        (org-element-parse-buffer)))))
 
 (defun org-el-cache-process-file (file)
@@ -183,7 +206,7 @@ current buffer."
           (when (org-el-cache-member-p cache filename)
             (unless el
               (setq el (org-element-parse-buffer))
-              (setq hash (org-el-cache--buffer-hash)))
+              (setq hash (secure-hash 'sha1 (current-buffer))))
             (org-el-cache--process-root cache filename hash el))))))
 
 (defun org-el-cache--rename-file (cache from to)
@@ -266,35 +289,46 @@ current buffer."
 
 ;;; Persisting / Loading Caches
 
-  (defun org-el-cache-persist (cache)
-    "Store CACHE on disk."
-    (with-slots (table file) cache
-      (with-temp-buffer
-        (insert (with-output-to-string (prin1 table)))
-        (write-file file))))
+(defun org-el-cache-persist (cache)
+  "Store CACHE on disk."
+  (if org-el-cache-persist
+      (with-slots (table file) cache
+        (with-temp-buffer
+          (insert (with-output-to-string (prin1 table)))
+          (write-file file)))
+    (message "org-el-cache: Persisting caches is not enabled")))
 
 (defun org-el-cache-load (cache)
   "Try loading CACHE from disk."
-  (with-slots (table file) cache
-    (if (file-exists-p file)
-        (with-temp-buffer
-          (insert-file-contents file)
-          (goto-char (point-min))
-          (let ((table_ (read (current-buffer))))
-            (if (hash-table-p table_)
-                (setf table table_)
-              (error "org-el-cache: malformed cache file")))))))
+  (if org-el-cache-persist
+      (with-slots (table file) cache
+        (if (file-exists-p file)
+            (with-temp-buffer
+              (insert-file-contents file)
+              (goto-char (point-min))
+              (let ((table_ (read (current-buffer))))
+                (if (hash-table-p table_)
+                    (setf table table_)
+                  (error "org-el-cache: malformed cache file"))))))
+    (message "org-el-cache: Persisting caches is not enabled")))
 
 (defun org-el-cache-persist-all ()
   "Persist all caches to disk."
   (interactive)
-  (dolist (cache (org-el-all-caches))
-    (org-el-cache-persist cache)))
+  (if org-el-cache-persist
+      (dolist (cache (org-el-all-caches))
+        (org-el-cache-persist cache))
+    (message "org-el-cache: Persisting caches is not enabled")))
 
-(run-at-time
- nil
- org-el-cache-persist-interval
- #'org-el-cache-persist-all)
+(defvar org-el-cache-timer nil
+  "Timer for persisting caches.")
+
+(if (and org-el-cache-persist (null org-el-cache-timer))
+    (setq org-el-cache-timer
+          (run-at-time
+           nil
+           org-el-cache-persist-interval
+           #'org-el-cache-persist-all)))
 
 ;;; Mapping / Reduction Functions
 
