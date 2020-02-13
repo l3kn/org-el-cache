@@ -31,7 +31,6 @@
 (def-org-el-cache
   file-selector-cache
   '("~/org")
-  "~/org/.file-selector-cache.el"
   #'file-selector--extract-title)
 
 ;; Update / Initialize the cache

@@ -36,7 +36,7 @@
       (save-buffer))
     filename))
 
-(defun org-el-cache-test--extract-tile (filename el)
+(defun org-el-cache-test--extract-title (filename el)
   (org-element-map el 'keyword
     (lambda (kw)
       (if (string= (org-element-property :key kw) "TITLE")
@@ -51,8 +51,8 @@
     (def-org-el-cache
       org-el-test-cache
       (list dir)
-      (expand-file-name "cache.el" dir)
-      #'org-el-cache-test--extract-tile)
+      #'org-el-cache-test--extract-title
+      :file (expand-file-name "cache.el" dir))
 
     (org-el-cache-update org-el-test-cache)
     (should (= (org-el-cache-count org-el-test-cache) 2))
@@ -61,14 +61,15 @@
     (should (equal (org-el-cache-get org-el-test-cache f1) "Foo"))
     (should (equal (org-el-cache-get org-el-test-cache f2) "Bar"))
 
-    ;; Persistence
-    (org-el-cache-persist org-el-test-cache)
-    (org-el-cache-clear org-el-test-cache)
-    (should (= (org-el-cache-count org-el-test-cache) 0))
-    (org-el-cache-load org-el-test-cache)
-    (should (= (org-el-cache-count org-el-test-cache) 2))
-    (should (equal (org-el-cache-get org-el-test-cache f1) "Foo"))
-    (should (equal (org-el-cache-get org-el-test-cache f2) "Bar"))
+    (when org-el-cache-persist
+      ;; Persistence
+      (org-el-cache-persist org-el-test-cache)
+      (org-el-cache-clear org-el-test-cache)
+      (should (= (org-el-cache-count org-el-test-cache) 0))
+      (org-el-cache-load org-el-test-cache)
+      (should (= (org-el-cache-count org-el-test-cache) 2))
+      (should (equal (org-el-cache-get org-el-test-cache f1) "Foo"))
+      (should (equal (org-el-cache-get org-el-test-cache f2) "Bar")))
 
     ;; File Updating
     (with-current-buffer (find-file-noselect f1)
@@ -85,4 +86,6 @@
     ;; Renaming Files
     (rename-file f2 new-name)
     (should (= (org-el-cache-count org-el-test-cache) 1))
-    (should (equal (org-el-cache-files org-el-test-cache) (list new-name)))))
+    (should (equal (org-el-cache-files org-el-test-cache) (list new-name)))
+
+    (org-el-cache-remove-cache org-el-test-cache)))
