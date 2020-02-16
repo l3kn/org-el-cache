@@ -28,11 +28,6 @@
   :group 'external
   :group 'text)
 
-(defcustom org-el-cache-persist-interval (* 30 60)
-  "Store the cache on disk every n seconds."
-  :type 'integer
-  :group 'org-el-cache)
-
 (defcustom org-el-cache-directory (expand-file-name "org-el-caches/" user-emacs-directory)
   "Directory to store cache files in."
   :type 'path
@@ -317,18 +312,9 @@ current buffer."
   (interactive)
   (if org-el-cache-persist
       (dolist (cache (org-el-all-caches))
-        (org-el-cache-persist cache))
-    (message "org-el-cache: Persisting caches is not enabled")))
+        (org-el-cache-persist cache))))
 
-(defvar org-el-cache-timer nil
-  "Timer for persisting caches.")
-
-(if (and org-el-cache-persist (null org-el-cache-timer))
-    (setq org-el-cache-timer
-          (run-at-time
-           nil
-           org-el-cache-persist-interval
-           #'org-el-cache-persist-all)))
+(add-hook 'kill-emacs-hook 'org-el-cache-persist-all)
 
 ;;; Mapping / Reduction Functions
 
