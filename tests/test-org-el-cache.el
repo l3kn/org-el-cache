@@ -1,10 +1,8 @@
-;;; org-el-cache-test.el --- Tests for org-el-cache -*- lexical-binding: t; -*-
+;;; test-org-el-cache.el --- Tests for org-el-cache -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2020  Leon Rische
 
 ;; Author: Leon Rische <emacs@leonrische.me>
-;; Package-requires: ((emacs "26.3"))
-;; Version: 0.0.1
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
