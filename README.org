@@ -152,3 +152,5 @@ code as possible and figure out where the bugs are.
 - Use ~secure-hash~ instead of ~buffer-hash~
 - Use ~defun~ instead of ~defmethod~, the function help looks nicer
   this way and we don't need overloaded methods
+* License
+Copyright © Leon Rische and contributors. Distributed under the GNU General Public License, Version 3
