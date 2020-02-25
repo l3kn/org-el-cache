@@ -19,9 +19,20 @@
 ;; You should have received a copy of the GNU General Public License
 ;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-(require 'cl)
+;;; Commentary:
+;;
+;; This library implements a persistent cache for data derived from
+;; parsed org-elements.
+;;
+;;; Code:
+;;;; Requirements
 
-;;; Configuration
+(require 'org)
+(require 'eieio)
+(require 'subr-x)
+(require 'org-element)
+
+;;;; Customization
 
 (defgroup org-el-cache nil
   "Persistent cache for data derived from org-elements."
@@ -34,11 +45,11 @@
   :group 'org-el-cache)
 
 (defcustom org-el-cache-persist t
-  "Enable persisting caches to disk"
+  "Enable persisting caches to disk."
   :type 'boolean
   :group 'org-el-cache)
 
-;;; Creating Caches
+;;;; Creating Caches
 
 (defclass org-el-cache ()
   ((folders :initarg :folders)
@@ -57,13 +68,14 @@
 
 (defun org-el-cache-remove-cache (cache)
   "Remove CACHE from the list of active caches."
-  (remhash (oref cache name) org-el-caches))
+  (remhash (oref cache name) org-el-caches)
+  (delete-file (oref cache file)))
 
 (cl-defun make-org-el-cache (name folders hook &key file include-archives)
   "Create a new org-el-cache and add it to the list of active caches.
 NAME should be a symbol."
   (unless (symbolp name)
-    (error "org-el-cache: Cache name must be a symbol, was %s" name))
+    (error "Cache name must be a symbol, was %s" name))
   (when (null file)
     (setq file (expand-file-name (format "%s.el" name) org-el-cache-directory)))
   (make-directory (file-name-directory file) t)
@@ -86,11 +98,11 @@ NAME should be a symbol."
 cache and binds it to a variable named NAME."
   ;; Make sure to evaluate name only once
   (unless (symbolp name)
-    (error "org-el-cache: Cache name must be a symbol, was %s" name))
-  `(setq ,name
-         (make-org-el-cache (quote ,name) ,folders ,hook
-                            :file ,file
-                            :include-archives ,include-archives)))
+    (error "Cache name must be a symbol, was %s" name))
+  `(defvar ,name
+     (make-org-el-cache (quote ,name) ,folders ,hook
+                        :file ,file
+                        :include-archives ,include-archives)))
 
 (defun org-el-cache-get (cache file)
   "Get the value for FILE from CACHE."
@@ -104,17 +116,18 @@ cache and binds it to a variable named NAME."
           (file (expand-file-name file)))
       (and (or (string= extension "org")
                (and include-archives (string= extension "org_archive")))
-           (some
+           (seq-find
             (lambda (folder) (string-prefix-p folder file))
             folders)))))
 
 (defun org-el-cache-remove (cache file)
+  "Remove the entry for FILE from CACHE."
   (remhash
    (expand-file-name file)
    (oref cache table)))
 
 (defun org-el-cache-clear (cache)
-  "Clear CACHE."
+  "Clear CACHE, removing all entries."
   (interactive)
   (clrhash (oref cache table)))
 
@@ -126,14 +139,14 @@ cache and binds it to a variable named NAME."
   "List of all files managed by CACHE."
   (hash-table-keys (oref cache table)))
 
-;;; Helper Functions
+;;;; Helper Functions
 
 (defun org-el-cache-interpret-data (data)
   "Interpret DATA stripping positional / style information."
   (let ((string (org-element-interpret-data data)))
     (substring-no-properties string)))
 
-;;; Processing Files / Buffers, Per Cache
+;;;; Processing Files / Buffers, Per Cache
 
 ;; This is the fastest way of parsing the contents of a file into an
 ;; org-element I've found so far.
@@ -146,8 +159,8 @@ cache and binds it to a variable named NAME."
       (org-el-cache--process-buffer cache file))))
 
 (defun org-el-cache--process-buffer (cache filename)
-  "Update the cache entry for FILE using the contents of the
-current buffer."
+  "Process the current buffer in the context of CACHE.
+The result is stored as an entry for FILENAME in the cache."
   (message "Processing file %s" filename)
   (org-el-cache--process-root
    cache
@@ -156,7 +169,9 @@ current buffer."
    (org-element-parse-buffer)))
 
 (defun org-el-cache--process-root (cache filename hash el)
-  "Process the org-element root element EL."
+  "Process the org-element root element EL inside CACHE.
+The result is stored as en entry for FILENAME in the cache, using
+HASH as the hash for the data."
   (with-slots (hook table) cache
     (puthash
      filename
@@ -165,7 +180,7 @@ current buffer."
            :data (funcall hook filename el))
      table)))
 
-;;; Processing Files / Buffers, Global
+;;;; Processing Files / Buffers, Global
 
 ;; TODO: Check if there is a buffer visiting this file,
 ;; use it to parse the file instead.
@@ -180,6 +195,7 @@ current buffer."
        (org-element-parse-buffer)))))
 
 (defun org-el-cache-process-file (file)
+  "Process FILE, updating all caches."
   (let (el hash)
     ;; Hacky way to only parse the buffer if it its file is member
     ;; of at least one cache
@@ -192,7 +208,7 @@ current buffer."
         (org-el-cache--process-root cache file hash el)))))
 
 (defun org-el-cache-process-buffer ()
-  ;; TODO
+  "Process the current buffer, updating all caches."
   (if-let ((filename (buffer-file-name)))
       ;; Hacky way to only parse the buffer if it its file is member
       ;; of at least one cache
@@ -205,25 +221,29 @@ current buffer."
             (org-el-cache--process-root cache filename hash el))))))
 
 (defun org-el-cache--rename-file (cache from to)
+  "Rename the entry for FROM in CACHE to TO."
   (if (org-el-cache-member-p cache from)
-   (with-slots (table) cache
-     (if (org-el-cache-member-p cache to)
-         (puthash to (gethash from table) table))
-     (remhash from table))))
+      (with-slots (table) cache
+        (if (org-el-cache-member-p cache to)
+            (puthash to (gethash from table) table))
+        (remhash from table))))
 
 (defun org-el-cache-rename-file (from to)
-  (message "org-el-cache: Renaming entries for %s to %s" from to)
+  "Rename the file at FROM to TO in all caches."
+  (message "Renaming cache entries for %s to %s" from to)
   (dolist (cache (org-el-all-caches))
     (org-el-cache--rename-file cache from to)))
 
 (defun org-el-cache-delete-file (file)
+  "Delete the entry for FILE in all caches."
   (dolist (cache (org-el-all-caches))
     (org-el-cache-remove cache file)))
 
-;;; Advice / Hooks
+;;;; Advice / Hooks
 
 ;; TODO: rewrite using defadvice
 (defun org-el-cache--delete-file-advice (file &optional _trash)
+  "Advice for deleting FILE from all caches."
   (let ((truename (file-truename file)))
     (org-el-cache-delete-file truename)))
 
@@ -231,6 +251,7 @@ current buffer."
 
 ;; TODO: rewrite using defadvice
 (defun org-el-cache--rename-file-advice (file-old file-new &optional _ok-if-already-exists)
+  "Advice for renaming FILE-OLD to FILE-NEW in all caches."
   (org-el-cache-delete-file file-old)
   (org-el-cache-process-file (file-truename file-new)))
 
@@ -243,10 +264,12 @@ current buffer."
                       (lambda () (org-el-cache-process-buffer))
                       nil t)))
 
-;;; Initializing / Updating Caches
+;;;; Initializing / Updating Caches
 
 (defun org-el-cache--find (paths &optional include-archives)
-  "Generate shell code to search PATHS for org files."
+  "Generate shell code to search PATHS for org files.
+If INCLUDE-ARCHIVES is non-nil, org_archive files are included,
+too."
   (if include-archives
       (format
        "find %s -name \"[a-Z0-9_]*.org\" -o -name \"[a-Z0-9_]*.org_archive\" "
@@ -257,32 +280,43 @@ current buffer."
 
 (defun org-el-cache--file-hashes (cache)
   "List all files managed by CACHE together with their hashes."
-  (with-slots (folders include-archives) cache
-    (mapcar
-     (lambda (line)
-       (let ((parts (split-string line "  ")))
-         (cons (cadr parts) (car parts))))
-     (split-string
-      (shell-command-to-string
-       (concat
-        (org-el-cache--find folders include-archives)
-        " | xargs sha1sum"))
-      "\n"
-      t))))
+  (let ((table (make-hash-table :test 'equal :size 1000)))
+    (with-slots (folders include-archives) cache
+      (mapcar
+       (lambda (line)
+         (let ((parts (split-string line "  ")))
+           (puthash (cadr parts) (car parts) table)))
+       (split-string
+        (shell-command-to-string
+         (concat
+          (org-el-cache--find folders include-archives)
+          " | xargs sha1sum"))
+        "\n"
+        t)))
+    table))
 
 (defun org-el-cache-update (cache)
   "Update all outdated entries in CACHE."
-  (loop for (file . hash) in (org-el-cache--file-hashes cache) do
+   (let ((table (org-el-cache--file-hashes cache)))
+     (maphash
+      (lambda (file hash)
         (let ((entry (gethash file (oref cache table))))
           (unless (and entry (string= (plist-get entry :hash) hash))
-            (org-el-cache--process-file cache file)))))
+            (org-el-cache--process-file cache file))))
+      table)
+     ;; Remove cache entries not in the file-hash table
+     (maphash
+      (lambda (file entry)
+        (unless (gethash file table)
+          (org-el-cache-remove cache file)))
+      (oref cache table))))
 
 (defun org-el-cache-force-update (cache)
   "Re-initialize CACHE."
   (org-el-cache-clear cache)
   (org-el-cache-update cache))
 
-;;; Persisting / Loading Caches
+;;;; Persisting / Loading Caches
 
 (defun org-el-cache-persist (cache)
   "Store CACHE on disk."
@@ -291,7 +325,7 @@ current buffer."
         (with-temp-buffer
           (insert (with-output-to-string (prin1 table)))
           (write-file file)))
-    (message "org-el-cache: Persisting caches is not enabled")))
+    (message "Warning: Persisting caches is not enabled")))
 
 (defun org-el-cache-load (cache)
   "Try loading CACHE from disk."
@@ -304,8 +338,8 @@ current buffer."
               (let ((table_ (read (current-buffer))))
                 (if (hash-table-p table_)
                     (setf table table_)
-                  (error "org-el-cache: malformed cache file"))))))
-    (message "org-el-cache: Persisting caches is not enabled")))
+                  (error "Malformed cache file %s" file))))))
+    (message "Warning: Persisting caches is not enabled")))
 
 (defun org-el-cache-persist-all ()
   "Persist all caches to disk."
@@ -316,22 +350,22 @@ current buffer."
 
 (add-hook 'kill-emacs-hook 'org-el-cache-persist-all)
 
-;;; Mapping / Reduction Functions
+;;;; Mapping / Reduction Functions
 
 (defun org-el-cache-reduce (cache fn acc)
   "Reduce over each entry of CACHE using FN.
 FN is called with three arguments:
 1. the cache key (filename)
 2. the cache entry
-3. the accumulator, initially set to ACC "
+3. the accumulator, initially set to ACC"
   (maphash
    (lambda (key entry) (setq acc (funcall fn key (plist-get entry :data) acc)))
    (oref cache table))
   acc)
 
 (defun org-el-cache-map (cache mapfn)
-  "Map over each entry in CACHE, collecting the results of calling
-FN with two arguments:
+  "Map over each entry in CACHE, collecting the results.
+MAPFN is called with two arguments:
 1. the cache key (filename)
 2. the cache entry"
   (org-el-cache-reduce
@@ -340,8 +374,8 @@ FN with two arguments:
    '()))
 
 (defun org-el-cache-select (cache filterfn)
-  "Map over each entry in CACHE, collecting all files for which FN evaluates to a non-nil value.
-FN is with two arguments:
+  "Select entries in CACHE matching the predicate FILTERFN.
+FILTERFN is called with two arguments:
 1. the cache key (filename)
 2. the cache entry"
   (org-el-cache-reduce
@@ -362,6 +396,8 @@ FN is called with two arguments:
      (funcall fn filename (plist-get entry :data)))
    (oref cache table)))
 
-;;; Exports
+;;;; Footer
 
 (provide 'org-el-cache)
+
+;;; org-el-cache.el ends here
